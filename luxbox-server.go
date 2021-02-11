@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -14,87 +15,99 @@ import (
 // TODO Store in some sort of config
 const STORAGE_PATH = "/home/leon/.luxbox"
 
+type requestData struct {
+	Action string            `json:"action"`
+	Meta   map[string]string `json:"meta"`
+}
+
+type responseData struct {
+	Code int         `json:"code"`
+	Data interface{} `json:"data"`
+}
+
 var actions = map[string]interface{ action.IAction }{
 	"register": action.RegisterAction{},
+}
+
+func response(conn net.Conn, code int, data interface{}) {
+	response, err := json.Marshal(responseData{code, data})
+
+	if err == nil {
+		conn.Write(append(response, '\n'))
+	} else {
+		fmt.Printf("ERR: failed to send response: %s\n", err.Error())
+	}
 }
 
 func handle(conn net.Conn) {
 	fmt.Printf("handing connection from: %s\n", conn.RemoteAddr().String())
 	defer conn.Close()
 
+	// Read the header information
 	req, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		conn.Write([]byte("ERR: failed to read input: " + err.Error() + "\n"))
+		response(conn, -1, "failed to read input: "+err.Error())
 		return
 	}
 
+	// Remove whitespace from start/end of header, including newline characters
 	req = strings.TrimSpace(string(req))
 
-	params := make(map[string]string)
-	args := strings.Split(req, ";")
-
-	for _, arg := range args {
-		data := strings.Split(arg, ":")
-
-		if len(data) != 2 {
-			conn.Write([]byte("ERR: parameters must be in key:value format\n"))
-			continue
-		}
-
-		params[data[0]] = data[1]
+	data := requestData{}
+	if err = json.Unmarshal([]byte(req), &data); err != nil {
+		response(conn, -1, "could not decode request: "+err.Error())
+		return
 	}
 
+	// Create user repository and attempt to find the given user, if provided
 	userRepository, err := repository.NewUserRepository()
 	if err != nil {
-		conn.Write([]byte("ERR: server error: " + err.Error() + "\n"))
+		response(conn, -1, "server error:"+err.Error())
 	}
 
 	userParam := ""
-	if user, ok := params["user"]; ok {
+	if user, ok := data.Meta["user"]; ok {
 		userParam = user
 	}
 
 	user, userErr := userRepository.Find(userParam)
 
-	// TODO Handle user authentication
-	if _, ok := params["action"]; ok {
-		if _, ok := actions[params["action"]]; !ok {
-			conn.Write([]byte("ERR: action '" + params["action"] + "' not supported\n"))
+	// Find the configured helper for the given action
+	if _, ok := actions[data.Action]; !ok {
+		response(conn, -1, "action '"+data.Action+"' not supported")
+		return
+	}
+
+	handler := actions[data.Action].New()
+
+	// If the given handler requires user authentication, enforce it
+	if handler.RequireUserAuth() {
+		if userErr != nil {
+			response(conn, -1, "user not found")
 			return
 		}
 
-		handler := actions[params["action"]].New()
-
-		if handler.RequireUserAuth() {
-			if userErr != nil {
-				conn.Write([]byte("ERR: user not found\n"))
-				return
-			}
-
-			if token, ok := params["token"]; !ok || user.Token != token {
-				conn.Write([]byte("ERR: user authentication failed\n"))
-				return
-			}
+		if token, ok := data.Meta["token"]; !ok || user.Token != token {
+			response(conn, -1, "user authentication failed")
+			return
 		}
+	}
 
-		delete(params, "action")
-		request := action.Request{User: &user, Conn: conn, Params: params}
+	request := action.Request{User: &user, Conn: conn, Params: data.Meta}
 
-		if err := handler.Validate(&request); err == nil {
-			response := handler.Handle(&request)
-
-			conn.Write([]byte(fmt.Sprintf("code:%d;payload:%s", response.Code, response.Payload)))
-		} else {
-			conn.Write([]byte("ERR: invalid request payload: " + err.Error() + "\n"))
-		}
+	// Validate the request with the handler, and handle if successful
+	if err := handler.Validate(&request); err == nil {
+		res := handler.Handle(&request)
+		response(conn, res.Code, res.Payload)
 	} else {
-		conn.Write([]byte("ERR: missing action in request payload\n"))
+		response(conn, -1, "invalid request payload: "+err.Error())
 	}
 }
 
 func main() {
 	fmt.Println("starting...")
 
+	// Create the storage path when it does not exist yet
 	if _, err := os.Stat(STORAGE_PATH); os.IsNotExist(err) {
 		err := os.MkdirAll(STORAGE_PATH, os.ModePerm)
 
@@ -104,16 +117,18 @@ func main() {
 		}
 	}
 
-	// listen on port 8068
+	// Listen on port 8068
 	l, _ := net.Listen("tcp", ":8068")
 
 	for {
+		// Attempt to accept all incoming connections
 		c, err := l.Accept()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
+		// Connection OK, dispatch to goroutine and continue listening to new connections
 		go handle(c)
 	}
 }
