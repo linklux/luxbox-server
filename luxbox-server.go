@@ -29,6 +29,7 @@ type responseData struct {
 
 var actions = map[string]interface{ action.IAction }{
 	"register": action.RegisterAction{},
+	"upload":   action.UploadAction{},
 }
 
 func response(conn net.Conn, code int, data interface{}) {
