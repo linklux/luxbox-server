@@ -23,8 +23,8 @@ type requestData struct {
 }
 
 type responseData struct {
-	Code int         `json:"code"`
-	Data interface{} `json:"data"`
+	Code int                    `json:"code"`
+	Data map[string]interface{} `json:"data"`
 }
 
 var actions = map[string]interface{ action.IAction }{
@@ -32,7 +32,7 @@ var actions = map[string]interface{ action.IAction }{
 	"upload":   action.UploadAction{},
 }
 
-func response(conn net.Conn, code int, data interface{}) {
+func response(conn net.Conn, code int, data map[string]interface{}) {
 	response, err := json.Marshal(responseData{code, data})
 
 	if err == nil {
@@ -40,6 +40,10 @@ func response(conn net.Conn, code int, data interface{}) {
 	} else {
 		fmt.Printf("ERR: failed to send response: %s\n", err.Error())
 	}
+}
+
+func error(conn net.Conn, code int, msg string) {
+	response(conn, code, map[string]interface{}{"error": msg})
 }
 
 func stringHashB64(val string) string {
@@ -56,7 +60,7 @@ func handle(conn net.Conn) {
 	// Read the header information
 	req, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		response(conn, -1, "failed to read input: "+err.Error())
+		error(conn, -1, "failed to read input: "+err.Error())
 		return
 	}
 
@@ -65,14 +69,14 @@ func handle(conn net.Conn) {
 
 	data := requestData{}
 	if err = json.Unmarshal([]byte(req), &data); err != nil {
-		response(conn, -1, "could not decode request: "+err.Error())
+		error(conn, -1, "could not decode request: "+err.Error())
 		return
 	}
 
 	// Create user repository and attempt to find the given user, if provided
 	userRepository, err := repository.NewUserRepository()
 	if err != nil {
-		response(conn, -1, "server error:"+err.Error())
+		error(conn, -1, "server error:"+err.Error())
 	}
 
 	userParam := ""
@@ -84,7 +88,7 @@ func handle(conn net.Conn) {
 
 	// Find the configured helper for the given action
 	if _, ok := actions[data.Action]; !ok {
-		response(conn, -1, "action '"+data.Action+"' not supported")
+		error(conn, -1, "action '"+data.Action+"' not supported")
 		return
 	}
 
@@ -93,19 +97,19 @@ func handle(conn net.Conn) {
 	// If the given handler requires user authentication, enforce it
 	if handler.RequireUserAuth() {
 		if userErr != nil {
-			response(conn, -1, "user not found")
+			error(conn, -1, "user not found")
 			return
 		}
 
 		if _, ok := data.Meta["token"]; !ok {
-			response(conn, -1, "token parameter missing in request meta")
+			error(conn, -1, "token parameter missing in request meta")
 			return
 		}
 
 		storedToken := stringHashB64(user.Token)
 
 		if data.Meta["token"] != string(storedToken) {
-			response(conn, -1, "user authentication failed")
+			error(conn, -1, "user authentication failed")
 			return
 		}
 	}
@@ -115,9 +119,9 @@ func handle(conn net.Conn) {
 	// Validate the request with the handler, and handle if successful
 	if err := handler.Validate(&request); err == nil {
 		res := handler.Handle(&request)
-		response(conn, res.Code, res.Payload)
+		response(conn, res.Code, res.Data)
 	} else {
-		response(conn, -1, "invalid request payload: "+err.Error())
+		error(conn, -1, "invalid request payload: "+err.Error())
 	}
 }
 

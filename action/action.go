@@ -23,6 +23,6 @@ type Request struct {
 }
 
 type Response struct {
-	Code    int
-	Payload string
+	Code int
+	Data map[string]interface{}
 }

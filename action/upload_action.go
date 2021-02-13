@@ -55,7 +55,9 @@ func (this UploadAction) Validate(request *Request) error {
 func (this UploadAction) Handle(request *Request) Response {
 	f, err := this.Truncate("data", request.Meta["user"].(string), request.Meta["resourceName"].(string))
 	if err != nil {
-		return Response{-1, "failed to create resource"}
+		return Response{-1, map[string]interface{}{
+			"error": "failed to create resource",
+		}}
 	}
 
 	resourceSize := uint64(request.Meta["resourceSize"].(float64))
@@ -101,12 +103,16 @@ func (this UploadAction) Handle(request *Request) Response {
 		f.Close()
 		os.Remove(resource)
 
-		return Response{-1, fmt.Sprintf("resource creation failed, %s", errMsg.Error())}
+		return Response{-1, map[string]interface{}{
+			"error": fmt.Sprintf("resource creation failed, %s", errMsg.Error()),
+		}}
 	}
 
 	f.Close()
 
-	return Response{3, "resource created"}
+	return Response{3, map[string]interface{}{
+		"message": "resource created",
+	}}
 }
 
 func min(x, y uint64) uint64 {

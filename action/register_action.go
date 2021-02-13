@@ -25,13 +25,17 @@ func (this RegisterAction) Validate(request *Request) error {
 func (this RegisterAction) Handle(request *Request) Response {
 	userRepository, err := repository.NewUserRepository()
 	if err != nil {
-		return Response{-1, "ERR: server error: " + err.Error() + "\n"}
+		return Response{-1, map[string]interface{}{
+			"error": "server error: " + err.Error(),
+		}}
 	}
 
 	uuid := this.GenerateUuid4()
 	token, err := this.GenerateString(32)
 	if err != nil {
-		return Response{-1, "ERR: failed to generate token"}
+		return Response{-1, map[string]interface{}{
+			"error": "failed to generate token",
+		}}
 	}
 
 	user := repository.User{ID: uuid, Token: token}
@@ -41,5 +45,8 @@ func (this RegisterAction) Handle(request *Request) Response {
 
 	fmt.Printf("registered user %s\n", uuid)
 
-	return Response{0, fmt.Sprintf("registered, your token: %s\n", token)}
+	return Response{0, map[string]interface{}{
+		"id":    uuid,
+		"token": token,
+	}}
 }
