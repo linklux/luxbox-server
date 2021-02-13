@@ -19,7 +19,7 @@ type Request struct {
 	User *repository.User
 	Conn net.Conn
 
-	Params map[string]string
+	Meta map[string]interface{}
 }
 
 type Response struct {

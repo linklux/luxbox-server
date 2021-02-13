@@ -1,8 +1,6 @@
 package action
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 
 	"github.com/linklux/luxbox-server/component"
@@ -36,10 +34,7 @@ func (this RegisterAction) Handle(request *Request) Response {
 		return Response{-1, "ERR: failed to generate token"}
 	}
 
-	hash := sha256.New()
-	hash.Write([]byte(token))
-
-	user := repository.User{ID: uuid, Token: base64.URLEncoding.EncodeToString(hash.Sum(nil))}
+	user := repository.User{ID: uuid, Token: token}
 
 	userRepository.Save(&user)
 	userRepository.Flush()

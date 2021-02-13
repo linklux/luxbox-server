@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,8 +18,8 @@ import (
 const STORAGE_PATH = "/home/leon/.luxbox"
 
 type requestData struct {
-	Action string            `json:"action"`
-	Meta   map[string]string `json:"meta"`
+	Action string                 `json:"action"`
+	Meta   map[string]interface{} `json:"meta"`
 }
 
 type responseData struct {
@@ -37,6 +39,13 @@ func response(conn net.Conn, code int, data interface{}) {
 	} else {
 		fmt.Printf("ERR: failed to send response: %s\n", err.Error())
 	}
+}
+
+func stringHashB64(val string) string {
+	hash := sha256.New()
+	hash.Write([]byte(val))
+
+	return base64.URLEncoding.EncodeToString(hash.Sum(nil))
 }
 
 func handle(conn net.Conn) {
@@ -67,7 +76,7 @@ func handle(conn net.Conn) {
 
 	userParam := ""
 	if user, ok := data.Meta["user"]; ok {
-		userParam = user
+		userParam = user.(string)
 	}
 
 	user, userErr := userRepository.Find(userParam)
@@ -87,13 +96,20 @@ func handle(conn net.Conn) {
 			return
 		}
 
-		if token, ok := data.Meta["token"]; !ok || user.Token != token {
+		if _, ok := data.Meta["token"]; !ok {
+			response(conn, -1, "token parameter missing in request meta")
+			return
+		}
+
+		storedToken := stringHashB64(user.Token)
+
+		if data.Meta["token"] != string(storedToken) {
 			response(conn, -1, "user authentication failed")
 			return
 		}
 	}
 
-	request := action.Request{User: &user, Conn: conn, Params: data.Meta}
+	request := action.Request{User: &user, Conn: conn, Meta: data.Meta}
 
 	// Validate the request with the handler, and handle if successful
 	if err := handler.Validate(&request); err == nil {
