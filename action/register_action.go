@@ -46,7 +46,7 @@ func (this RegisterAction) Handle(request *Request) Response {
 	fmt.Printf("registered user %s\n", uuid)
 
 	return Response{0, map[string]interface{}{
-		"id":    uuid,
+		"user":  uuid,
 		"token": token,
 	}}
 }

@@ -37,10 +37,20 @@ func (this UploadAction) Validate(request *Request) error {
 		errs = append(errs, "missing or empty meta param: 'resourceName'")
 	} else if resourceName, ok := val.(string); !ok {
 		errs = append(errs, "invalid value for 'resourceName', must be string")
-	} else if val, ok := request.Meta["overwrite"]; !ok {
-		if overwrite, ok := val.(bool); !ok {
-			errs = append(errs, "invalid value for 'overwrite', must be boolean")
-		} else if overwrite && this.Exists("data", request.Meta["user"].(string), resourceName) {
+	} else {
+		// If the optional overwrite meta param is included, use its value to
+		// determine file overwrites otherwise, assume false
+		overwrite := false
+		if val, ok := request.Meta["overwrite"]; ok {
+			if _, ok := val.(bool); !ok {
+				errs = append(errs, "invalid value for 'overwrite', must be boolean")
+			} else {
+				overwrite = val.(bool)
+			}
+		}
+
+		// If the file exists, and the overwrite flag is not given, fail validation
+		if !overwrite && this.Exists("data", request.Meta["user"].(string), resourceName) {
 			errs = append(errs, "resource exists, use the 'overwrite' flag to overwrite")
 		}
 	}
@@ -65,6 +75,12 @@ func (this UploadAction) Handle(request *Request) Response {
 
 	r := bufio.NewReader(request.Conn)
 	read, chunks := uint64(0), int(0)
+
+	fmt.Printf("receiving data for resource '%s' (%d bytes) created by %s...",
+		request.Meta["resourceName"].(string),
+		resourceSize,
+		request.Meta["user"].(string),
+	)
 
 	// Let the client know we're ready to start receiving data
 	request.Conn.Write([]byte("ready\n"))
@@ -103,12 +119,16 @@ func (this UploadAction) Handle(request *Request) Response {
 		f.Close()
 		os.Remove(resource)
 
+		fmt.Printf(" failed\n")
+
 		return Response{-1, map[string]interface{}{
 			"error": fmt.Sprintf("resource creation failed, %s", errMsg.Error()),
 		}}
 	}
 
 	f.Close()
+
+	fmt.Printf(" done\n")
 
 	return Response{3, map[string]interface{}{
 		"message": "resource created",
